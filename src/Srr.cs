@@ -24,10 +24,53 @@ namespace SrrCore
 
         public List<SrrFileInfo> ArchivedFileInfos = new List<SrrFileInfo>();
 
+        private List<SrrFileInfo> SfvData = new List<SrrFileInfo>();
+
+        private static List<SrrFileInfo> ProcessSfv(string fileData)
+        {
+            List<SrrFileInfo> sfvLinesData = new List<SrrFileInfo>();
+
+            string[] sfvLines = fileData
+                .Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => s.Trim())
+                .Where(s => !string.IsNullOrEmpty(s))
+                .ToArray();
+
+            foreach (string sfvLine in sfvLines)
+            {
+                if (sfvLine[0] == ';' || sfvLine.Length < 10)
+                {
+                    //comment, ignore for now
+                }
+                else
+                {
+                    //sfv line
+                    int spaceIndex = sfvLine.LastIndexOf(' ');
+
+                    string fileName = sfvLine.Substring(0, spaceIndex);
+
+                    //fix for if name is surrounded by quotations
+                    if (fileName[0] == '"' && fileName[fileName.Length - 1] == '"')
+                    {
+                        fileName = fileName.Substring(1, fileName.Length - 1);
+                    }
+
+                    string crc = sfvLine.Substring(spaceIndex + 1, 8);
+
+                    sfvLinesData.Add(new SrrFileInfo
+                    {
+                        FileName = fileName,
+                        FileCrc = Convert.ToUInt32(crc, 16)
+                    });
+                }
+            }
+
+            return sfvLinesData;
+        }
+
         public static Srr ReadSrr(string filename)
         {
-            using (BinaryReader reader =
-                new BinaryReader(File.Open(filename, FileMode.Open, FileAccess.Read, FileShare.Read)))
+            using (BinaryReader reader = new BinaryReader(File.Open(filename, FileMode.Open, FileAccess.Read, FileShare.Read)))
             {
                 return ReadSrr(reader);
             }
@@ -63,9 +106,7 @@ namespace SrrCore
                 SrrBlockHeader header = new SrrBlockHeader
                 {
                     HeaderCrc = BitConverter.ToUInt16(headerBuff, 0),
-                    BlockType = Enum.IsDefined(typeof(RarBlockType), headerBuff[2])
-                        ? (RarBlockType) headerBuff[2]
-                        : RarBlockType.Unknown,
+                    BlockType = Enum.IsDefined(typeof(RarBlockType), headerBuff[2]) ? (RarBlockType) headerBuff[2] : RarBlockType.Unknown,
                     Flags = BitConverter.ToUInt16(headerBuff, 3),
                     HeaderSize = BitConverter.ToUInt16(headerBuff, 5),
                     AddSize = 0
@@ -73,8 +114,7 @@ namespace SrrCore
 
                 int addSizeFlag = header.Flags & 0x8000;
 
-                if (addSizeFlag > 0 || header.BlockType == RarBlockType.RarPackedFile ||
-                    header.BlockType == RarBlockType.RarNewSub)
+                if (addSizeFlag > 0 || header.BlockType == RarBlockType.RarPackedFile || header.BlockType == RarBlockType.RarNewSub)
                 {
                     header.AddSize = reader.ReadUInt32();
                 }
@@ -82,7 +122,7 @@ namespace SrrCore
                 long offset = reader.BaseStream.Position;
                 reader.BaseStream.Seek(startOffset + 2, SeekOrigin.Begin);
 
-                char[] crcData = reader.ReadChars(header.HeaderSize - 2);
+                byte[] crcData = reader.ReadBytes(header.HeaderSize - 2);
                 uint crc = Crc32Algorithm.Compute(crcData.Select(c => (byte)c).ToArray()) & 0xffff;
 
                 //move back seek, now we know addsize and crc
@@ -99,7 +139,6 @@ namespace SrrCore
 
                         byte[] fileData = new byte[header.AddSize]; //allocate byte array
                         reader.Read(fileData, 0, (int) header.AddSize); //read data to byte array
-                        //string stringFileData = Encoding.ASCII.GetString(fileData); 
 
                         srr.StoredFileInfos.Add(new SrrFileInfo
                         {
@@ -108,6 +147,12 @@ namespace SrrCore
                             FileData = fileData,
                             FileCrc = Crc32Algorithm.Compute(fileData)
                         });
+
+                        if (fileName.EndsWith(".sfv"))
+                        {
+                            //sfv file
+                            srr.SfvData.AddRange(ProcessSfv(System.Text.Encoding.Default.GetString(fileData)));
+                        }
 
                         break;
                     case RarBlockType.SrrRarFile:
@@ -153,8 +198,7 @@ namespace SrrCore
 
                         srr.Compressed = compressionMethod != 0x30;
 
-                        SrrFileInfo archiveInfo =
-                            srr.ArchivedFileInfos.FirstOrDefault(x => x.FileName == fileName3);
+                        SrrFileInfo archiveInfo = srr.ArchivedFileInfos.FirstOrDefault(x => x.FileName == fileName3);
 
                         if (archiveInfo != null)
                         {
@@ -175,8 +219,7 @@ namespace SrrCore
                         break;
                     default:
                         //minus headerLength because we already read that(?)
-                        reader.BaseStream.Seek(header.HeaderSize + header.AddSize - HeaderLength,
-                            SeekOrigin.Current);
+                        reader.BaseStream.Seek(header.HeaderSize + header.AddSize - HeaderLength, SeekOrigin.Current);
 
                         break;
                 }
@@ -187,6 +230,15 @@ namespace SrrCore
                 }
             }
 
+            //sfv mapping
+            if(srr.RaredFileInfos.Count > 0)
+            {
+                srr.RaredFileInfos.Select(x =>
+                {
+                    x.FileCrc = srr.SfvData.FirstOrDefault(y => y.FileName.ToLower() == x.FileName.ToLower()).FileCrc;
+                    return x;
+                }).ToList();
+            }
 
             return srr;
         }
