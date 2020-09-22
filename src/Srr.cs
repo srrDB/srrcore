@@ -6,7 +6,7 @@ using Force.Crc32;
 
 namespace SrrCore
 {
-    public class Srr
+    public partial class Srr
     {
         private const int HeaderLength = 7;
 
@@ -217,9 +217,44 @@ namespace SrrCore
                         //skip addional header (skipHeader)
                         reader.BaseStream.Seek(startOffset + header.HeaderSize, SeekOrigin.Begin);
                         break;
+                    case RarBlockType.RarNewSub: //TODO: fix much better
+                        ulong packedSize2 = header.AddSize;
+
+                        ulong unpackedSize2 = reader.ReadUInt32(); //us
+                        reader.ReadByte(); //os (skip)
+                        uint fileCrc2 = reader.ReadUInt32(); //crc
+                        reader.ReadUInt32(); //datetime (skip)
+                        reader.ReadByte(); //unpackVersion (skip)
+                        byte compressionMethod2 = reader.ReadByte();
+                        ushort nameLength2 = reader.ReadUInt16();
+                        reader.ReadUInt32(); //file attributes (skip)
+
+                        // if large file flag is set, next are 4 bytes each for high order bits of file sizes
+                        if ((header.Flags & 0x100) != 0)
+                        {
+                            //read additional bytes
+                            packedSize2 += reader.ReadUInt32() * 0x100000000ul;
+                            unpackedSize2 += reader.ReadUInt32() * 0x100000000ul;
+                        }
+
+                        // and finally, the file name.
+                        string fileName4 = new string(reader.ReadChars(nameLength2));
+                       
+                        if(fileName4 == "RR")
+                        {
+                            string recovery = "Protect+";
+                        }
+
+                        //skip addional header (skipHeader)
+                        reader.BaseStream.Seek(startOffset + header.HeaderSize, SeekOrigin.Begin);
+
+                        break;
                     default:
-                        //minus headerLength because we already read that(?)
-                        reader.BaseStream.Seek(header.HeaderSize + header.AddSize - HeaderLength, SeekOrigin.Current);
+                        //don't read more after we've reached the end
+                        if (startOffset + header.HeaderSize + header.AddSize <= reader.BaseStream.Length)
+                        {
+                            reader.BaseStream.Seek(startOffset + header.HeaderSize + header.AddSize, SeekOrigin.Begin);
+                        }
 
                         break;
                 }

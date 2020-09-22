@@ -21,4 +21,26 @@
         SrrStoredFile = 0x6A,
         SrrRarFile = 0x71
     }
+
+    public partial class Srr
+    {
+        struct RarPackedFileHeader
+        {
+            ulong unpackedSize;
+
+            byte os;
+
+            ulong fileCrc;
+
+            ulong fileTime;
+
+            byte unpackVersion;
+
+            byte compressionMethod;
+
+            ushort nameLenght;
+
+            ulong fileAttributes;
+        }
+    }
 }
