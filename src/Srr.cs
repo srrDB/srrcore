@@ -31,7 +31,7 @@ namespace SrrCore
             List<SrrFileInfo> sfvLinesData = new List<SrrFileInfo>();
 
             string[] sfvLines = fileData
-                .Split(new[] { Environment.NewLine }, StringSplitOptions.RemoveEmptyEntries)
+                .Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim())
                 .Where(s => !string.IsNullOrEmpty(s))
                 .ToArray();
