@@ -20,6 +20,9 @@ namespace SrrCore
 
         public List<SrrFileInfo> StoredFileInfos = new List<SrrFileInfo>();
 
+        public bool HasNfo => this.StoredFileInfos.Select(x => x.FileName.ToLower()).Any(x => x.EndsWith(".nfo"));
+        public bool HasSrs => this.StoredFileInfos.Select(x => x.FileName.ToLower()).Any(x => x.EndsWith(".srs"));
+
         public List<SrrFileInfo> RaredFileInfos = new List<SrrFileInfo>();
 
         public List<SrrFileInfo> ArchivedFileInfos = new List<SrrFileInfo>();
