@@ -1,6 +1,6 @@
-﻿namespace SrrCore
+﻿namespace srrcore
 {
-    enum RarBlockType : byte
+    public enum RarBlockType : byte
     {
         Unknown = 0,
         RarVolumeHeader = 0x73,
@@ -8,9 +8,9 @@
         RarOldRecovery = 0x78,
         RarNewSub = 0x7A,
 
-        //not intresting
-        RarMin = 0x72,
-        RarMax = 0x7B,
+        //not intresting in web (only for reconstruction)
+        RarMin = 0x72, //"RAR Marker"
+        RarMax = 0x7B, //"Archive end"
         OldComment = 0x75,
         OldAuthenticity1 = 0x76,
         OldSubblock = 0x77,
@@ -19,28 +19,10 @@
         //srr
         SrrHeader = 0x69,
         SrrStoredFile = 0x6A,
-        SrrRarFile = 0x71
-    }
+        SrrRarFile = 0x71,
 
-    public partial class Srr
-    {
-        struct RarPackedFileHeader
-        {
-            ulong unpackedSize;
-
-            byte os;
-
-            ulong fileCrc;
-
-            ulong fileTime;
-
-            byte unpackVersion;
-
-            byte compressionMethod;
-
-            ushort nameLenght;
-
-            ulong fileAttributes;
-        }
+        //new
+        SrrOsoHash = 0x6B,
+        SrrRarPadding = 0x6C
     }
 }

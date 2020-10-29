@@ -1,6 +1,6 @@
-﻿namespace SrrCore
+﻿namespace srrcore
 {
-    struct SrrBlockHeader
+    public struct SrrBlockHeader
     {
         public ushort HeaderCrc;
 
@@ -13,5 +13,24 @@
         public uint AddSize;
 
         public uint FullSize => this.AddSize + this.HeaderSize;
+    }
+
+    public struct RarPackedFileHeader
+    {
+        public ulong unpackedSize;
+
+        public byte os;
+
+        public uint fileCrc;
+
+        public ulong fileTime;
+
+        public byte unpackVersion;
+
+        public byte compressionMethod;
+
+        public ushort nameLength;
+
+        public ulong fileAttributes;
     }
 }

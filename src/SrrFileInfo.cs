@@ -1,4 +1,4 @@
-﻿namespace SrrCore
+﻿namespace srrcore
 {
     public class SrrFileInfo
     {
@@ -8,6 +8,6 @@
 
         public byte[] FileData;
 
-        public uint FileCrc;
+        public uint FileCrc; //from sfv, matched using filename
     }
 }
