@@ -2,37 +2,133 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text;
+using System.Runtime.CompilerServices;
 using Force.Crc32;
 
-namespace SrrCore
+namespace srrcore
 {
-    public partial class Srr
+    public class Srr
     {
-        private const int HeaderLength = 7;
+        public const int HEADERLENGTH = 7;
 
-        public string ApplicationName;
+        private string _fileName; //including path
 
-        public bool Compressed;
+        //public string ApplicationName;
+
+        public string ApplicationName
+        {
+            get
+            {
+                //TODO: handle multiple srrheaderblocks
+                return this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.SrrHeader).Select(x => x as SrrHeaderBlock).Select(x => x.AppName).FirstOrDefault();
+            }
+        }
+
+        //public bool Compressed;
+
+        public bool Compressed
+        {
+            get
+            {
+                return this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.RarPackedFile).Select(x => x as RarPackedFileBlock).Any(x => x.CompressionMethod != 0x30);
+            }
+        }
 
         public long FileSize;
 
         //public uint FileCRC;
 
-        public List<SrrFileInfo> StoredFileInfos = new List<SrrFileInfo>();
+        public List<Block> BlockList = new List<Block>();
+
+        //public List<SrrFileInfo> StoredFileInfos = new List<SrrFileInfo>();
+
+        public List<SrrFileInfo> StoredFileInfos
+        {
+            get
+            {
+                return this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.SrrStoredFile).Select(x => x as SrrStoredFileBlock).Select(x => new SrrFileInfo
+                {
+                    FileName = x.FileName,
+                    FileOffset = x.FileOffset,
+                    FileSize = x.FileLength
+                }).ToList();
+            }
+        }
+
+        //public List<SrrFileInfo> RaredFileInfos = new List<SrrFileInfo>();
+
+        public List<SrrFileInfo> RaredFileInfos
+        {
+            get
+            {
+                return this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.SrrRarFile).Select(x => x as SrrRarFileBlock).Select(x => new SrrFileInfo
+                {
+                    FileName = x.FileName,
+                    FileSize = x.FileLength,
+                    FileCrc = this.SfvData.FirstOrDefault(y => y.FileName == x.FileName)?.FileCrc ?? 0
+                }).ToList();
+            }
+        }
+
+        //public List<SrrFileInfo> ArchivedFileInfos = new List<SrrFileInfo>();
+
+        public List<SrrFileInfo> ArchivedFileInfos
+        {
+            get
+            {
+                return this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.RarPackedFile).Select(x => x as RarPackedFileBlock).GroupBy(x => x.FileName).Select(x => new SrrFileInfo
+                {
+                    FileName = x.LastOrDefault().FileName,
+                    FileSize = x.LastOrDefault().UnpackedSize,
+                    FileCrc = x.LastOrDefault().FileCrc,
+                }).ToList();
+            }
+        }
+
+        public SrrFileInfo RarRecovery
+        {
+            get
+            {
+                if (this.BlockList.Any(x => x.SrrBlockHeader.BlockType == RarBlockType.RarOldRecovery))
+                {
+                    //old recovery
+                    RarOldRecoveryBlock rorb = this.BlockList.FirstOrDefault(x => x.SrrBlockHeader.BlockType == RarBlockType.RarOldRecovery) as RarOldRecoveryBlock;
+
+                    if (rorb != null)
+                    {
+                        return new SrrFileInfo
+                        {
+                            FileName = "Protect!",
+                            FileSize = 0
+                        };
+                    }
+                }
+                else if (this.BlockList.Any(x => x.SrrBlockHeader.BlockType == RarBlockType.RarNewSub))
+                {
+                    RarRecoveryBlock rrb = this.BlockList.FirstOrDefault(x => x.SrrBlockHeader.BlockType == RarBlockType.RarNewSub) as RarRecoveryBlock;
+
+                    if (rrb != null)
+                    {
+                        return new SrrFileInfo
+                        {
+                            FileName = "Protect+",
+                            FileSize = 0
+                        };
+                    }
+                }
+
+                return null;
+            }
+        }
+
+        public List<SrrFileInfo> SfvData = new List<SrrFileInfo>();
 
         public bool HasNfo => this.StoredFileInfos.Select(x => x.FileName.ToLower()).Any(x => x.EndsWith(".nfo"));
         public bool HasSrs => this.StoredFileInfos.Select(x => x.FileName.ToLower()).Any(x => x.EndsWith(".srs"));
 
-        public List<SrrFileInfo> RaredFileInfos = new List<SrrFileInfo>();
-
-        public List<SrrFileInfo> ArchivedFileInfos = new List<SrrFileInfo>();
-
-        private List<SrrFileInfo> SfvData = new List<SrrFileInfo>();
-
-        private static List<SrrFileInfo> ProcessSfv(string fileData)
+        private bool ProcessSfv(string fileData)
         {
-            List<SrrFileInfo> sfvLinesData = new List<SrrFileInfo>();
-
             string[] sfvLines = fileData
                 .Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim())
@@ -50,44 +146,229 @@ namespace SrrCore
                     //sfv line
                     int spaceIndex = sfvLine.LastIndexOf(' ');
 
-                    string fileName = sfvLine.Substring(0, spaceIndex);
-
-                    //fix for if name is surrounded by quotations
-                    if (fileName[0] == '"' && fileName[fileName.Length - 1] == '"')
+                    if (spaceIndex > -1)
                     {
-                        fileName = fileName.Substring(1, fileName.Length - 1);
+                        string fileName = sfvLine.Substring(0, spaceIndex);
+
+                        //if name is surrounded by quotations
+                        if (fileName.StartsWith("\"") && fileName.EndsWith("\""))
+                        {
+                            fileName = fileName.Substring(1, fileName.Length - 1);
+                        }
+
+                        string crc = sfvLine.Substring(spaceIndex + 1, 8);
+
+                        this.SfvData.Add(new SrrFileInfo
+                        {
+                            FileName = fileName,
+                            FileCrc = Convert.ToUInt32(crc, 16)
+                        });
                     }
-
-                    string crc = sfvLine.Substring(spaceIndex + 1, 8);
-
-                    sfvLinesData.Add(new SrrFileInfo
-                    {
-                        FileName = fileName,
-                        FileCrc = Convert.ToUInt32(crc, 16)
-                    });
                 }
             }
 
-            return sfvLinesData;
+            return true;
         }
 
-        public static Srr ReadSrr(string filename)
+        private BinaryReader _reader;
+
+        public Srr(string filename)
         {
-            using (BinaryReader reader = new BinaryReader(File.Open(filename, FileMode.Open, FileAccess.Read, FileShare.Read)))
+            this._fileName = filename;
+
+            if (!System.IO.File.Exists(this._fileName))
             {
-                return ReadSrr(reader);
+                //if file does not exists
+                throw new Exception(this._fileName + " doesn't exists");
+            }
+
+            this._reader = new BinaryReader(File.Open(filename, FileMode.Open, FileAccess.Read, FileShare.Read));
+            ReadSrr_New(this._reader);
+        }
+
+        public Srr(Stream stream)
+        {
+            this._reader = new BinaryReader(stream);
+            ReadSrr_New(this._reader);
+        }
+
+        //TODO: prevent duplicate filename
+        //TODO: prevent filename starting with bad character
+        //TODO: prevent filename containing bad character
+        //TODO: don't use this._fileName (see GetStoredFileData, it's only set if it's a file, not set if it's a stream);
+        public void AddStoredFile(string fileName, byte[] fileData)
+        {
+            string hex = "6A6A6A0080";
+            byte[] header = Enumerable.Range(0, hex.Length).Where(x => x % 2 == 0).Select(x => Convert.ToByte(hex.Substring(x, 2), 16)).ToArray();
+
+            byte[] addSize = BitConverter.GetBytes((UInt32)(fileData.Length));
+            byte[] pathLength = BitConverter.GetBytes((ushort)fileName.Length);
+            byte[] headerSize = BitConverter.GetBytes((ushort)(5 + 2 + 4 + 2 + fileName.Length));
+
+            byte[] fileNameBytes = Encoding.ASCII.GetBytes(fileName);
+
+            //TODO: there should be a more efficient way to concat byte arrays
+            byte[] newHeader = header.Concat(headerSize).Concat(addSize).Concat(pathLength).Concat(fileNameBytes).ToArray();
+
+            Block blockToAddAfter = this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.SrrStoredFile).LastOrDefault();
+
+            byte[] srrBytes = File.ReadAllBytes(this._fileName);
+
+            byte[] first = srrBytes.Take((int)blockToAddAfter.BlockPosition + (int)blockToAddAfter.SrrBlockHeader.FullSize).ToArray();
+            byte[] after = srrBytes.Skip((int)blockToAddAfter.BlockPosition + (int)blockToAddAfter.SrrBlockHeader.FullSize).ToArray();
+
+            int totalFilesize = first.Length + after.Length + newHeader.Length + fileData.Length;
+
+            File.WriteAllBytes(this._fileName, first.Concat(newHeader).Concat(fileData).Concat(after).ToArray());
+        }
+
+        public void RenameFile(string oldFilename, string newFilename)
+        {
+            //TODO
+        }
+
+        public void ReorderFiles(string[] orderedFilenames)
+        {
+            //TODO
+        }
+
+        //TODO: don't use this._fileName (see GetStoredFileData, it's only set if it's a file, not set if it's a stream);
+        public void RemoveStoredFile(string fileName)
+        {
+            foreach (SrrStoredFileBlock srrStoredFileBlock in this.BlockList.Where(x => x.SrrBlockHeader.BlockType == RarBlockType.SrrStoredFile).Select(x => x as SrrStoredFileBlock))
+            {
+                if (srrStoredFileBlock.FileName == fileName)
+                {
+                    byte[] srrBytes = File.ReadAllBytes(this._fileName);
+                    int remaning = srrBytes.Length - (int)srrStoredFileBlock.FileLength;
+
+                    byte[] first = srrBytes.Take((int)srrStoredFileBlock.BlockPosition).ToArray();
+                    byte[] after = srrBytes.Skip((int)srrStoredFileBlock.BlockPosition).Skip((int)srrStoredFileBlock.SrrBlockHeader.FullSize).Take(remaning).ToArray();
+
+                    File.WriteAllBytes(this._fileName, first.Concat(after).ToArray());
+                }
             }
         }
 
-        public static Srr ReadSrr(Stream stream)
+        public byte[] GetStoredFileData(string fileName)
         {
-            using (BinaryReader reader = new BinaryReader(stream))
+            SrrFileInfo srrFileInfo = this.StoredFileInfos.FirstOrDefault(x => x.FileName == fileName);
+
+            if (srrFileInfo != null)
             {
-                return ReadSrr(reader);
+                this._reader.BaseStream.Seek((int)srrFileInfo.FileOffset, SeekOrigin.Begin);
+
+                return this._reader.ReadBytes((int)srrFileInfo.FileSize);
+            }
+
+            return null;
+        }
+
+        private void ReadSrr_New(BinaryReader reader)
+        {
+            this.FileSize = reader.BaseStream.Length;
+
+            SrrRarFileBlock currentRarFile = null;
+
+            while (reader.BaseStream.Position < reader.BaseStream.Length)
+            {
+                long startOffset = reader.BaseStream.Position;
+
+                byte[] header = reader.ReadBytes(HEADERLENGTH);
+
+                SrrBlockHeader srrBlockHeader = new SrrBlockHeader
+                {
+                    HeaderCrc = BitConverter.ToUInt16(header, 0),
+                    BlockType = Enum.IsDefined(typeof(RarBlockType), header[2]) ? (RarBlockType)header[2] : RarBlockType.Unknown,
+                    Flags = BitConverter.ToUInt16(header, 3),
+                    HeaderSize = BitConverter.ToUInt16(header, 5)
+                };
+
+                int addSizeFlag = srrBlockHeader.Flags & 0x8000;
+
+                if (addSizeFlag > 0 || srrBlockHeader.BlockType == RarBlockType.RarPackedFile || srrBlockHeader.BlockType == RarBlockType.RarNewSub)
+                {
+                    srrBlockHeader.AddSize = reader.ReadUInt32();
+                }
+
+                //calculate rar file size
+                if (currentRarFile != null && srrBlockHeader.BlockType != RarBlockType.SrrRarFile)
+                {
+                    currentRarFile.FileLength += srrBlockHeader.FullSize;
+                }
+
+                switch (srrBlockHeader.BlockType)
+                {
+                    case RarBlockType.SrrHeader:
+                        this.BlockList.Add(new SrrHeaderBlock(srrBlockHeader, startOffset, ref reader));
+                        break;
+                    case RarBlockType.SrrStoredFile:
+                        SrrStoredFileBlock srrStoredFileBlock = new SrrStoredFileBlock(srrBlockHeader, startOffset, ref reader);
+                        this.BlockList.Add(srrStoredFileBlock);
+
+                        reader.ReadBytes((int)srrBlockHeader.AddSize); //skip stored file data
+                        break;
+                    case RarBlockType.SrrRarFile:
+                        currentRarFile = new SrrRarFileBlock(srrBlockHeader, startOffset, ref reader);
+                        this.BlockList.Add(currentRarFile);
+                        break;
+                    case RarBlockType.RarVolumeHeader:
+                        this.BlockList.Add(new RarVolumeHeaderBlock(srrBlockHeader, startOffset, ref reader));
+                        reader.ReadBytes((int)srrBlockHeader.HeaderSize - HEADERLENGTH); //this skip block?
+                        break;
+                    case RarBlockType.RarPackedFile:
+                        RarPackedFileBlock rarPackedFileBlock = new RarPackedFileBlock(srrBlockHeader, startOffset, ref reader);
+
+                        this.BlockList.Add(rarPackedFileBlock);
+
+                        reader.BaseStream.Seek(startOffset + rarPackedFileBlock.SrrBlockHeader.HeaderSize, SeekOrigin.Begin);
+                        break;
+                    case RarBlockType.RarOldRecovery:
+                        this.BlockList.Add(new RarOldRecoveryBlock(srrBlockHeader, startOffset, ref reader));
+                        break;
+                    case RarBlockType.RarNewSub:
+                        //if (isRecovery)
+                        if (true)
+                        {
+                            RarRecoveryBlock rarRecoveryBlock = new RarRecoveryBlock(srrBlockHeader, startOffset, ref reader); //BROKEN 2020-11-22 04:18:00
+
+                            this.BlockList.Add(rarRecoveryBlock);
+
+                            reader.BaseStream.Seek(startOffset + rarRecoveryBlock.SrrBlockHeader.HeaderSize, SeekOrigin.Begin);
+                        }
+                        else
+                        {
+                            this.BlockList.Add(new Block(srrBlockHeader, startOffset, ref reader));
+                        }
+                        break;
+                    case RarBlockType.Unknown: //TODO: fix
+                        break;
+                    case RarBlockType.SrrOsoHash: //wont implement
+                    case RarBlockType.RarMin:
+                    case RarBlockType.RarMax:
+                    case RarBlockType.OldComment:
+                    case RarBlockType.OldAuthenticity1:
+                    case RarBlockType.OldSubblock:
+                    case RarBlockType.OldAuthenticity2:
+                        //case RarBlockType.SrrRarPadding:
+                        reader.ReadBytes(srrBlockHeader.HeaderSize - 7); //skip block
+                        break;
+                    default:
+                        //new Block(srrBlockHeader, startOffset, ref reader);
+                        reader.BaseStream.Seek(startOffset + srrBlockHeader.FullSize, SeekOrigin.Begin);
+                        break;
+                }
+            }
+
+            //sfv processing
+            foreach (SrrFileInfo sfvFile in this.StoredFileInfos.Where(x => x.FileName.ToLower().EndsWith(".sfv")))
+            {
+                byte[] sfvData = this.GetStoredFileData(sfvFile.FileName);
+                this.ProcessSfv(Encoding.UTF8.GetString(sfvData));
             }
         }
 
-        public static Srr ReadSrr(BinaryReader reader)
+        /*public static Srr ReadSrr(BinaryReader reader)
         {
             Srr srr = new Srr();
 
@@ -102,8 +383,8 @@ namespace SrrCore
             {
                 long startOffset = reader.BaseStream.Position;
 
-                byte[] headerBuff = new byte[HeaderLength];
-                reader.Read(headerBuff, 0, HeaderLength); //read into buffer
+                byte[] headerBuff = new byte[HEADERLENGTH];
+                reader.Read(headerBuff, 0, HEADERLENGTH); //read into buffer
 
                 //create header
                 SrrBlockHeader header = new SrrBlockHeader
@@ -279,6 +560,6 @@ namespace SrrCore
             }
 
             return srr;
-        }
+        }*/
     }
 }
