@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace srrcore
@@ -37,8 +38,26 @@ namespace srrcore
     public class SrrStoredFileBlock : Block
     {
         public string FileName { get; set; }
+
         public long FileOffset { get; set; }
+
         public uint FileLength { get; set; }
+
+        public static byte[] GetHeader(string fileName, int fileSize)
+        {
+            string hex = "6A6A6A0080";
+            byte[] header = Enumerable.Range(0, hex.Length).Where(x => x % 2 == 0).Select(x => Convert.ToByte(hex.Substring(x, 2), 16)).ToArray();
+
+            byte[] addSize = BitConverter.GetBytes((UInt32)(fileSize));
+            byte[] pathLength = BitConverter.GetBytes((ushort)fileName.Length);
+            byte[] headerSize = BitConverter.GetBytes((ushort)(5 + 2 + 4 + 2 + fileName.Length));
+
+            byte[] fileNameBytes = Encoding.ASCII.GetBytes(fileName);
+
+            byte[] newHeader = header.Concat(headerSize).Concat(addSize).Concat(pathLength).Concat(fileNameBytes).ToArray();
+
+            return newHeader;
+        }
 
         public SrrStoredFileBlock(SrrBlockHeader srrBlockHeader, long startOffset, ref BinaryReader reader) : base(srrBlockHeader, startOffset, ref reader)
         {
@@ -70,9 +89,13 @@ namespace srrcore
     public class RarPackedFileBlock : Block
     {
         public byte CompressionMethod { get; set; }
+
         public ulong PackedSize { get; set; }
+
         public ulong UnpackedSize { get; set; }
+
         public uint FileCrc { get; set; }
+
         public string FileName { get; set; }
 
         public RarPackedFileBlock(SrrBlockHeader srrBlockHeader, long startOffset, ref BinaryReader reader) : base(srrBlockHeader, startOffset, ref reader)
@@ -110,6 +133,7 @@ namespace srrcore
     public class RarRecoveryBlock : RarPackedFileBlock
     {
         public uint RecoverySectors { get; protected set; }
+
         public ulong DataSectors { get; protected set; }
 
         public RarRecoveryBlock(SrrBlockHeader srrBlockHeader, long startOffset, ref BinaryReader reader) : base(srrBlockHeader, startOffset, ref reader)
@@ -123,7 +147,9 @@ namespace srrcore
     public class RarOldRecoveryBlock : Block
     {
         public uint PackedSize { get; protected set; }
+
         public ushort RecoverySectors { get; protected set; }
+
         public uint DataSectors { get; protected set; }
 
         public RarOldRecoveryBlock(SrrBlockHeader srrBlockHeader, long startOffset, ref BinaryReader reader) : base(srrBlockHeader, startOffset, ref reader)
