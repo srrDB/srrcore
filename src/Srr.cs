@@ -62,7 +62,8 @@ namespace srrcore
                 {
                     FileName = x.FileName,
                     FileOffset = x.FileOffset,
-                    FileSize = x.FileLength
+                    FileSize = x.FileLength,
+                    FileCrc = x.FileCrc
                 }).ToList();
             }
         }
@@ -177,7 +178,7 @@ namespace srrcore
             return true;
         }
 
-        public Srr(string filename)
+        public Srr(string filename, bool calculateStoredCrc = false)
         {
             this._fileName = filename;
 
@@ -199,27 +200,31 @@ namespace srrcore
 
             using (this._reader = new BinaryReader(this._srrStream))
             {
-                ReadSrr(this._reader);
+                ReadSrr(this._reader, calculateStoredCrc);
             }
         }
 
-        public Srr(Stream stream)
+        public Srr(Stream stream, bool calculateStoredCrc = false)
         {
-            using (this._reader = new BinaryReader(stream))
+            this._srrStream = new MemoryStream();
+            this._srrStream.SetLength(stream.Length);
+            stream.CopyTo(this._srrStream);
+
+            using (this._reader = new BinaryReader(this._srrStream))
             {
-                ReadSrr(this._reader);
+                ReadSrr(this._reader, calculateStoredCrc);
             }
         }
 
         public void AddStoredFile(string fileName, byte[] fileData)
         {
-            if(this.StoredFileInfos.Any(x => x.FileName.ToLower() == fileName.ToLower()))
+            if (this.StoredFileInfos.Any(x => x.FileName.ToLower() == fileName.ToLower()))
             {
                 //file already exists
                 return;
             }
 
-            if(fileName.StartsWith("/") || fileName.StartsWith("\\"))
+            if (fileName.StartsWith("/") || fileName.StartsWith("\\"))
             {
                 //starts with bad character
                 return;
@@ -258,6 +263,7 @@ namespace srrcore
         public void RenameFile(string oldFilename, string newFilename)
         {
             //TODO
+            //useful? https://stackoverflow.com/questions/5733696/how-to-remove-data-from-a-memorystream
         }
 
         public void ReorderFiles(string[] orderedFilenames)
@@ -291,22 +297,24 @@ namespace srrcore
             }
         }
 
-        public byte[] GetStoredFileData(string srrFileName, string storedfileName)
+        public byte[] GetStoredFileData(string storedfileName)
         {
             SrrFileInfo srrFileInfo = this.StoredFileInfos.FirstOrDefault(x => x.FileName == storedfileName);
 
             if (srrFileInfo != null)
             {
-                this._reader.BaseStream.Seek((int)srrFileInfo.FileOffset, SeekOrigin.Begin);
+                byte[] srrBytes = this._srrStream.ToArray(); //a bit ugly, can't use srrStream nor reader here, they are disposed
 
-                return this._reader.ReadBytes((int)srrFileInfo.FileSize);
+                byte[] storedFileData = srrBytes.Skip((int)srrFileInfo.FileOffset).Take((int)srrFileInfo.FileSize).ToArray();
+
+                return storedFileData;
             }
 
             return null;
         }
 
         //processing
-        private void ReadSrr(BinaryReader reader)
+        private void ReadSrr(BinaryReader reader, bool calculateStoredCrc = false)
         {
             this.SrrSize = reader.BaseStream.Length;
 
@@ -317,7 +325,7 @@ namespace srrcore
 
             while (reader.BaseStream.Position < reader.BaseStream.Length)
             {
-                if(currentPosition != null && currentPosition.Value >= reader.BaseStream.Position)
+                if (currentPosition != null && currentPosition.Value >= reader.BaseStream.Position)
                 {
                     //endless loop
                     break;
@@ -358,6 +366,11 @@ namespace srrcore
                     case RarBlockType.SrrStoredFile:
                         SrrStoredFileBlock srrStoredFileBlock = new SrrStoredFileBlock(srrBlockHeader, startOffset, ref reader);
                         this.BlockList.Add(srrStoredFileBlock);
+
+                        if (calculateStoredCrc)
+                        {
+                            srrStoredFileBlock.FileCrc = Crc32Algorithm.Compute(this.GetStoredFileData(srrStoredFileBlock.FileName));
+                        }
 
                         reader.ReadBytes((int)srrBlockHeader.AddSize); //skip stored file data
                         break;
@@ -414,10 +427,13 @@ namespace srrcore
             }
 
             //sfv processing
-            foreach (SrrFileInfo sfvFile in this.StoredFileInfos.Where(x => x.FileName.ToLower().EndsWith(".sfv")))
+            foreach (SrrFileInfo storedFile in this.StoredFileInfos)
             {
-                byte[] sfvData = this.GetStoredFileData(this._fileName, sfvFile.FileName);
-                this.ProcessSfv(Encoding.UTF8.GetString(sfvData));
+                if (storedFile.FileName.ToLower().EndsWith(".sfv"))
+                {
+                    byte[] sfvData = this.GetStoredFileData(storedFile.FileName);
+                    this.ProcessSfv(Encoding.UTF8.GetString(sfvData));
+                }
             }
         }
     }

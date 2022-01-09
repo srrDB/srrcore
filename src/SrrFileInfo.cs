@@ -10,6 +10,6 @@
 
         //public byte[] FileData;
 
-        public uint FileCrc; //from sfv, matched using filename
+        public uint FileCrc; //if stored calculated, or from sfv matched using filename
     }
 }

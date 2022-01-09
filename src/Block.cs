@@ -43,6 +43,8 @@ namespace srrcore
 
         public uint FileLength { get; set; }
 
+        public uint FileCrc { get; set; } //calculated
+
         public static byte[] GetHeader(string fileName, int fileSize)
         {
             string hex = "6A6A6A0080";
