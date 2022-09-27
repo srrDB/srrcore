@@ -20,6 +20,10 @@ namespace srrcore
 
         public List<string> Warnings = new List<string>();
 
+        public long SrrSize;
+
+        private List<Block> BlockList = new List<Block>();
+
         public string ApplicationName
         {
             get
@@ -49,10 +53,6 @@ namespace srrcore
                 return packedFileBlocks.Any(x => x.CompressionMethod != 0x30);
             }
         }
-
-        public long SrrSize;
-
-        private List<Block> BlockList = new List<Block>();
 
         public List<SrrFileInfo> StoredFileInfos
         {
