@@ -3,14 +3,13 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
-using System.Runtime.CompilerServices;
 using Force.Crc32;
 
 namespace srrcore
 {
     public class Srr
     {
-        public const int HEADERLENGTH = 7;
+        private const int HEADERLENGTH = 7;
 
         private BinaryReader _reader;
 
@@ -18,11 +17,11 @@ namespace srrcore
 
         private string _fileName; //including path, not always specified
 
+        private List<Block> BlockList = new List<Block>();
+
         public List<string> Warnings = new List<string>();
 
         public long SrrSize;
-
-        private List<Block> BlockList = new List<Block>();
 
         public string ApplicationName
         {

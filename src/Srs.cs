@@ -2,13 +2,9 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Reflection.PortableExecutable;
 using System.Text;
-using System.Threading.Tasks;
 using System.Globalization;
 using srrcore.ReSample;
-using System.Collections;
-using System.Drawing;
 
 namespace srrcore
 {
@@ -26,11 +22,16 @@ namespace srrcore
 
     public class Srs
     {
-        public string _fileName { get; set; }
+        private string _fileName { get; set; }
 
         private BinaryReader _reader;
 
         private MemoryStream _srsStream = new MemoryStream();
+
+        //outputs
+        public List<TrackData> TrackDatas { get; set; } = new List<TrackData>();
+
+        public FileData FileData { get; set; }
 
         public Srs(string fileName)
         {
@@ -45,6 +46,18 @@ namespace srrcore
                 fileStream.CopyTo(this._srsStream);
             }
 
+            ReadSrsData();
+        }
+
+        public Srs(byte[] srsData)
+        {
+            this._srsStream = new MemoryStream(srsData);
+
+            ReadSrsData();
+        }
+
+        private void ReadSrsData()
+        {
             using (this._reader = new BinaryReader(this._srsStream))
             {
                 this._reader.BaseStream.Position = 0; //make sure position is at the start
@@ -71,10 +84,95 @@ namespace srrcore
                 {
                     ReadFlac();
                 }
+                else if (fileType == FileType.MP3)
+                {
+                    ReadMp3();
+                }
+                else if (fileType == FileType.STREAM)
+                {
+                    ReadStream();
+                }
             }
         }
 
-        public void ReadFlac()
+        private void ReadStream()
+        {
+            this._srsStream.Seek(0, SeekOrigin.Begin);
+
+            int startPos = 0;
+            int srsSize = (int)this._srsStream.Length;
+
+            while (startPos < srsSize)
+            {
+                if (startPos + 8 > srsSize)
+                {
+                    break; // SRS file too small
+                }
+            }
+        }
+
+        private void ReadMp3()
+        {
+            int srsSize = (int)this._reader.BaseStream.Length;
+
+            byte[] data = this._reader.ReadBytes(srsSize);
+
+            if (Encoding.UTF8.GetString(data.Take(3).ToArray()) == "ID3")
+            {
+                int tagLen = calcDecTagLen(data.Skip(6).Take(4).ToArray());
+
+                if (tagLen > srsSize)
+                {
+                    int next = Srs.IndexOf(data.Skip(10).ToArray(), Encoding.UTF8.GetBytes("ID3"));
+                    if (next > -1) next = next + 10; //adjust for the skip above
+
+                    if (next < srsSize)
+                    {
+                        tagLen = calcDecTagLen(data.Skip(next + 6).Take(4).ToArray());
+                        data = data.Skip(next + 10 + tagLen).ToArray();
+                    }
+                }
+                else
+                {
+                    data = data.Skip(10 + tagLen).ToArray();
+                }
+            }
+
+            int f = Srs.IndexOf(data, Encoding.UTF8.GetBytes("SRSF"));
+            int t = Srs.IndexOf(data.Skip(f).ToArray(), Encoding.UTF8.GetBytes("SRST"));
+            if (t > -1) t = t + f; //adjust for the skip above
+            int p = Srs.IndexOf(data.Skip(t).ToArray(), Encoding.UTF8.GetBytes("SRSP"));
+            if (p > -1) p = p + t; //adjust for the skip above
+
+            if (f > -1)
+            {
+                uint length = BitConverter.ToUInt32(data.Skip(f + 4).ToArray());
+                FileData fd = new FileData(data.Skip(f + 8).Take((int)length - 8).ToArray());
+
+                this.FileData = fd;
+            }
+
+            if (t > -1)
+            {
+                uint length = BitConverter.ToUInt32(data.Skip(t + 4).ToArray());
+                TrackData td = new TrackData(data.Skip(t + 8).Take((int)length - 8).ToArray());
+
+                this.TrackDatas.Add(td);
+            }
+
+            if (p > -1)
+            {
+                uint length = BitConverter.ToUInt32(data.Skip(p + 4).ToArray());
+                data = data.Skip(p + 8).Take((int)length).ToArray();
+
+                long duration = BitConverter.ToUInt32(data);
+                long fplength = BitConverter.ToUInt32(data, 4);
+
+                string fingerprint = Encoding.UTF8.GetString(data.Skip(8).Take((int)fplength).ToArray());
+            }
+        }
+
+        private void ReadFlac()
         {
             FlacReader flacReader = new FlacReader(this._reader);
 
@@ -83,12 +181,16 @@ namespace srrcore
                 if (flacReader.blockType == "s")
                 {
                     byte[] data = flacReader.readContents();
-                    FileData fs = new FileData(data);
+                    FileData fd = new FileData(data);
+
+                    this.FileData = fd;
                 }
                 else if (flacReader.blockType == "t")
                 {
                     byte[] data = flacReader.readContents();
                     TrackData td = new TrackData(data);
+
+                    this.TrackDatas.Add(td);
                 }
                 else if (flacReader.blockType == "u")
                 {
@@ -112,7 +214,7 @@ namespace srrcore
             }
         }
 
-        public void ReadWmv()
+        private void ReadWmv()
         {
             string GUID_SRS_FILE = "SRSFSRSFSRSFSRSF";
             string GUID_SRS_TRACK = "SRSTSRSTSRSTSRST";
@@ -145,11 +247,15 @@ namespace srrcore
 
                 if (guid == GUID_SRS_FILE)
                 {
-                    FileData fs = new FileData(header);
+                    FileData fd = new FileData(header);
+
+                    this.FileData = fd;
                 }
                 else if (guid == GUID_SRS_TRACK)
                 {
                     TrackData td = new TrackData(header);
+
+                    this.TrackDatas.Add(td);
                 }
                 else if (guid == GUID_SRS_PADDING)
                 {
@@ -165,7 +271,7 @@ namespace srrcore
 
         }
 
-        public void ReadMp4()
+        private void ReadMp4()
         {
             MovReader movReader = new MovReader(this._reader);
 
@@ -174,12 +280,16 @@ namespace srrcore
                 if (movReader.atomType == "SRSF")
                 {
                     byte[] data = movReader.readContents();
-                    FileData fs = new FileData(data);
+                    FileData fd = new FileData(data);
+
+                    this.FileData = fd;
                 }
                 else if (movReader.atomType == "SRST")
                 {
                     byte[] data = movReader.readContents();
                     TrackData td = new TrackData(data);
+
+                    this.TrackDatas.Add(td);
                 }
                 else if (movReader.atomType == "mdat")
                 {
@@ -192,7 +302,7 @@ namespace srrcore
             }
         }
 
-        public void ReadAvi()
+        private void ReadAvi()
         {
             RiffReader riffReader = new RiffReader(this._reader);
             bool done = false;
@@ -208,12 +318,16 @@ namespace srrcore
                     if (riffReader.fourcc == "SRSF") //sample file?
                     {
                         byte[] data = riffReader.readContents();
-                        FileData fs = new FileData(data);
+                        FileData fd = new FileData(data);
+
+                        this.FileData = fd;
                     }
                     else if (riffReader.fourcc == "SRST") //sample track?
                     {
                         byte[] data = riffReader.readContents();
                         TrackData td = new TrackData(data);
+
+                        this.TrackDatas.Add(td);
                     }
                     else if (riffReader.ChunkType == ChunkType.MOVI)
                     {
@@ -228,7 +342,7 @@ namespace srrcore
             }
         }
 
-        public void ReadMkv()
+        private void ReadMkv()
         {
             EbmlReader ebmlReader = new EbmlReader(this._reader);
             bool done = false;
@@ -242,12 +356,16 @@ namespace srrcore
                 else if (ebmlReader.Etype == EbmlType.ReSampleFile)
                 {
                     byte[] data = ebmlReader.readContents();
-                    FileData fs = new FileData(data);
+                    FileData fd = new FileData(data);
+
+                    this.FileData = fd;
                 }
                 else if (ebmlReader.Etype == EbmlType.ReSampleTrack)
                 {
                     byte[] data = ebmlReader.readContents();
                     TrackData td = new TrackData(data);
+
+                    this.TrackDatas.Add(td);
                 }
                 else if (ebmlReader.Etype == EbmlType.Cluster || ebmlReader.Etype == EbmlType.AttachmentList)
                 {
@@ -261,7 +379,7 @@ namespace srrcore
             }
         }
 
-        public FileType DetectFileFormat()
+        private FileType DetectFileFormat()
         {
             FileType ftReturn = FileType.Unknown;
 
@@ -304,15 +422,34 @@ namespace srrcore
                 else if (hex.Substring(0, 6) == "494433") //ID3
                 {
                     // can be MP3 or FLAC
-                    //TODO
+                    this._reader.BaseStream.Seek(6, SeekOrigin.Begin);
+
+                    int tagLen = calcDecTagLen(this._reader.ReadBytes(4));
+
+                    if (this._reader.BaseStream.Length >= 10 + tagLen)
+                    {
+                        if (Encoding.UTF8.GetString(this._reader.ReadBytes(4)) == "fLaC")
+                        {
+                            ftReturn = FileType.FLAC;
+                        }
+                        else
+                        {
+                            ftReturn = FileType.MP3;
+                        }
+                    }
+                    else
+                    {
+                        // not enough data in the file
+                        ftReturn = FileType.MP3;
+                    }
                 }
             }
 
-            this._reader.BaseStream.Seek(0, SeekOrigin.Begin);
+            this._reader.BaseStream.Seek(0, SeekOrigin.Begin); //reset handle
             return ftReturn;
         }
 
-        public static int IndexOf(byte[] arrayToSearchThrough, byte[] patternToFind)
+        private static int IndexOf(byte[] arrayToSearchThrough, byte[] patternToFind)
         {
             if (patternToFind.Length > arrayToSearchThrough.Length)
                 return -1;
@@ -333,6 +470,20 @@ namespace srrcore
                 }
             }
             return -1;
+        }
+
+        private int calcDecTagLen(byte[] word)
+        {
+            int m = 1;
+            int intt = 0;
+
+            for (var i = word.Length - 1; i > -1; i--)
+            {
+                intt += m * (char)word[i];
+                m = m * 128;
+            }
+
+            return intt;
         }
     }
 }

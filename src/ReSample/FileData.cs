@@ -11,7 +11,7 @@ namespace srrcore.ReSample
 
         public string Filename { get; set; }
 
-        public int Filesize { get; set; }
+        public ulong Filesize { get; set; }
 
         public string Crc32 { get; set; }
 
@@ -44,7 +44,7 @@ namespace srrcore.ReSample
             string lowHex = low.ToString("X").PadLeft(8, '0');
             string highHex = high.ToString("X");
 
-            this.Filesize = int.Parse(highHex + lowHex, NumberStyles.HexNumber); //real sample size
+            this.Filesize = (ulong)int.Parse(highHex + lowHex, NumberStyles.HexNumber); //real sample size
             this.Crc32 = crc32.ToString("X").PadLeft(8, '0'); //real sample crc
         }
     }
