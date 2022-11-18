@@ -88,7 +88,7 @@ namespace srrcore
                 {
                     ReadMp3();
                 }
-                else if (fileType == FileType.STREAM)
+                else if (fileType == FileType.STREAM) //mpg
                 {
                     ReadStream();
                 }
@@ -108,6 +108,27 @@ namespace srrcore
                 {
                     break; // SRS file too small
                 }
+
+                string marker = Encoding.UTF8.GetString(this._reader.ReadBytes(4));
+
+                uint blockSize = BitConverter.ToUInt32(this._reader.ReadBytes(4));
+
+                if (marker == "SRSF")
+                {
+                    byte[] data = this._reader.ReadBytes((int)blockSize - 8);
+                    FileData fd = new FileData(data);
+
+                    this.FileData = fd;
+                }
+                else if (marker == "SRST")
+                {
+                    byte[] data = this._reader.ReadBytes((int)blockSize - 8);
+                    TrackData td = new TrackData(data);
+
+                    this.TrackDatas.Add(td);
+                }
+
+                startPos += (int)blockSize;
             }
         }
 
@@ -426,7 +447,10 @@ namespace srrcore
 
                     int tagLen = calcDecTagLen(this._reader.ReadBytes(4));
 
-                    if (this._reader.BaseStream.Length >= 10 + tagLen)
+                    this._reader.BaseStream.Seek(10 + tagLen, SeekOrigin.Begin);
+
+                    //if there is more data in the file than the current position
+                    if (this._reader.BaseStream.Length >= this._reader.BaseStream.Position)
                     {
                         if (Encoding.UTF8.GetString(this._reader.ReadBytes(4)) == "fLaC")
                         {

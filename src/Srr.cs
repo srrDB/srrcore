@@ -219,7 +219,7 @@ namespace srrcore
         {
             if (this.StoredFileInfos.Any(x => x.FileName.ToLower() == fileName.ToLower()))
             {
-                //file already exists
+                //file with the same name already exists
                 return;
             }
 
@@ -232,7 +232,7 @@ namespace srrcore
             //\/:*?"<>|
             if (new[] { ":", "*", "?", "\"", "<", ">", "|" }.Any(c => fileName.Contains(c)))
             {
-                //contains invalid charcater
+                //filename contains invalid charcaters
                 return;
             }
 
@@ -281,13 +281,15 @@ namespace srrcore
                     byte[] srrBytes = this._srrStream.ToArray();
                     int remaning = srrBytes.Length - (int)srrStoredFileBlock.FileLength;
 
-                    byte[] first = srrBytes.Take((int)srrStoredFileBlock.BlockPosition).ToArray();
-                    byte[] after = srrBytes.Skip((int)srrStoredFileBlock.BlockPosition).Skip((int)srrStoredFileBlock.SrrBlockHeader.FullSize).Take(remaning).ToArray();
+                    byte[] beforeBytes = srrBytes.Take((int)srrStoredFileBlock.BlockPosition).ToArray();
+                    byte[] afterBytes = srrBytes.Skip((int)srrStoredFileBlock.BlockPosition).Skip((int)srrStoredFileBlock.SrrBlockHeader.FullSize).Take(remaning).ToArray();
 
-                    byte[] newSrrData = first.Concat(after).ToArray();
+                    byte[] newSrrData = beforeBytes.Concat(afterBytes).ToArray();
 
+                    //overwrite memorystream
                     this._srrStream = new MemoryStream(newSrrData);
 
+                    //write to file
                     using (FileStream fileStream = new FileStream(this._fileName, FileMode.OpenOrCreate | FileMode.Truncate, FileAccess.Write))
                     {
                         this._srrStream.CopyTo(fileStream);
