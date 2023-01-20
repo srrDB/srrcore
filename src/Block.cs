@@ -140,9 +140,10 @@ namespace srrcore
 
         public RarRecoveryBlock(SrrBlockHeader srrBlockHeader, long startOffset, ref BinaryReader reader) : base(srrBlockHeader, startOffset, ref reader)
         {
-            this.FileName = new string(reader.ReadChars(8)); //'Protect+', overwrites 'RR'
-            this.RecoverySectors = reader.ReadUInt32();
-            this.DataSectors = reader.ReadUInt64();
+            //these datas are read from the overriden RarPackedFileBlock
+            //this.FileName = new string(reader.ReadChars(8)); //'Protect+', overwrites 'RR'
+            //this.RecoverySectors = reader.ReadUInt32();
+            //this.DataSectors = reader.ReadUInt64();
         }
     }
 

@@ -184,7 +184,7 @@ namespace srrcore
             if (!File.Exists(this._fileName))
             {
                 //if file does not exists
-                throw new Exception(this._fileName + " doesn't exists");
+                throw new FileNotFoundException(this._fileName + " doesn't exists");
             }
 
             //copy file to a memorystream that will be used instead of the file
@@ -205,6 +205,8 @@ namespace srrcore
 
         public Srr(Stream stream, bool calculateStoredCrc = false)
         {
+            stream.Position = 0; //we must reset position before copy
+
             this._srrStream = new MemoryStream();
             this._srrStream.SetLength(stream.Length);
             stream.CopyTo(this._srrStream);
@@ -354,7 +356,8 @@ namespace srrcore
                 }
 
                 //calculate rar file size
-                if (currentRarFile != null && srrBlockHeader.BlockType != RarBlockType.SrrRarFile)
+                //TODO: SrrOsoHash check here is bad
+                if (currentRarFile != null && srrBlockHeader.BlockType != RarBlockType.SrrRarFile && srrBlockHeader.BlockType != RarBlockType.SrrOsoHash)
                 {
                     currentRarFile.FileLength += srrBlockHeader.FullSize;
                 }
@@ -394,21 +397,29 @@ namespace srrcore
                         this.BlockList.Add(new RarOldRecoveryBlock(srrBlockHeader, startOffset, ref reader));
                         break;
                     case RarBlockType.RarNewSub:
-                        //if (isRecovery)
                         if (true)
                         {
-                            RarRecoveryBlock rarRecoveryBlock = new RarRecoveryBlock(srrBlockHeader, startOffset, ref reader); //BROKEN 2020-11-22 04:18:00
+                            //release with CMT: Bolgen.2015.NORWEGIAN.720p.BluRay.x264-WASTE , 2022-12-18 03:45:00
+                            RarRecoveryBlock rarRecoveryBlock = new RarRecoveryBlock(srrBlockHeader, startOffset, ref reader);
 
                             this.BlockList.Add(rarRecoveryBlock);
 
-                            reader.BaseStream.Seek(startOffset + rarRecoveryBlock.SrrBlockHeader.HeaderSize, SeekOrigin.Begin);
+                            //TODO: not a correct check
+                            if (rarRecoveryBlock.FileName == "CMT")
+                            {
+                                reader.BaseStream.Seek(startOffset + rarRecoveryBlock.SrrBlockHeader.HeaderSize + (long)rarRecoveryBlock.PackedSize, SeekOrigin.Begin);
+                            }
+                            else
+                            {
+                                reader.BaseStream.Seek(startOffset + rarRecoveryBlock.SrrBlockHeader.HeaderSize, SeekOrigin.Begin);
+                            }
                         }
                         else
                         {
                             this.BlockList.Add(new Block(srrBlockHeader, startOffset, ref reader));
                         }
                         break;
-                    case RarBlockType.Unknown: //TODO: fix
+                    case RarBlockType.Unknown: //TODO: implement
                         break;
                     case RarBlockType.SrrOsoHash: //wont implement
                     case RarBlockType.RarMin:
@@ -417,8 +428,11 @@ namespace srrcore
                     case RarBlockType.OldAuthenticity1:
                     case RarBlockType.OldSubblock:
                     case RarBlockType.OldAuthenticity2:
-                        //case RarBlockType.SrrRarPadding:
                         reader.ReadBytes(srrBlockHeader.HeaderSize - 7); //skip block
+                        break;
+                    case RarBlockType.SrrRarPadding:
+                        currentRarFile.FileLength -= srrBlockHeader.HeaderSize;
+                        reader.BaseStream.Seek(startOffset + srrBlockHeader.FullSize, SeekOrigin.Begin);
                         break;
                     default:
                         //new Block(srrBlockHeader, startOffset, ref reader);

@@ -13,7 +13,7 @@ namespace srrcore.ReSample
 
         public uint SignatureSize { get; set; }
 
-        public int MatchOffset { get; set; }
+        public UInt64 MatchOffset { get; set; }
 
         public TrackData(byte[] data)
         {
@@ -71,7 +71,8 @@ namespace srrcore.ReSample
                 string lowHex = low.ToString("X").PadLeft(8, '0');
                 string highHex = high.ToString("X");
 
-                this.MatchOffset = int.Parse(highHex + lowHex, NumberStyles.HexNumber);
+                //Game.of.Thrones.S01E09.MULTi.2160p.UHD.BluRay.x265-SODAPOP, 4,907,703,732, uint not enought
+                this.MatchOffset = UInt64.Parse(highHex + lowHex, NumberStyles.HexNumber);
                 this.SignatureSize = signature;
             }
         }
